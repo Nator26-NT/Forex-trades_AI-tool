@@ -1,0 +1,1 @@
+# Forex-trades_AI-tool
