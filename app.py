@@ -1,3 +1,4 @@
+# app.py
 import streamlit as st
 from datetime import datetime
 import time
@@ -5,8 +6,10 @@ from config import MOBILE_CSS, ALL_TIMEFRAMES, QUICK_PAIRS
 from web_model import WebForexPredictor
 from risk_manager import RiskManager, get_market_session, generate_trading_signals
 from ui_components import display_analysis_result
+from mt5_integration import mt5_bridge
 
 def initialize_session_state():
+    """Initialize session state variables"""
     if 'menu_expanded' not in st.session_state:
         st.session_state.menu_expanded = False
     if 'symbol' not in st.session_state:
@@ -19,6 +22,10 @@ def initialize_session_state():
         st.session_state.analysis_complete = False
     if 'ad_timer_start' not in st.session_state:
         st.session_state.ad_timer_start = 0
+    if 'mt5_connected' not in st.session_state:
+        st.session_state.mt5_connected = False
+    if 'last_analysis' not in st.session_state:
+        st.session_state.last_analysis = None
 
 def show_ads():
     """Display Google AdSense ads and timer"""
@@ -87,11 +94,12 @@ def show_ad_timer():
     return remaining
 
 def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
+    """Perform enhanced AI analysis with regression and pattern recognition"""
     try:
         # Use the WebForexPredictor from web_model.py
         predictor = WebForexPredictor()
         
-        with st.spinner("🤖 AI is analyzing LIVE market data..."):
+        with st.spinner("🤖 AI is analyzing LIVE market data with advanced regression analysis..."):
             result = predictor.perform_web_analysis(symbol, timeframe)
         
         if 'error' in result:
@@ -100,35 +108,38 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
         if not result.get('success', False):
             return {'error': 'Analysis failed - no results returned'}
         
-        # Convert web model result to our format
+        # Enhanced prediction handling with regression confirmation
         prediction = 1 if "BUY" in result['recommendation'] else 0
-        confidence = result['confidence'] / 100
+        confidence = result['confidence']
+        confidence_decimal = confidence / 100
 
-        # Ensure probabilities are properly structured
+        # Enhanced probability handling
         probabilities = result.get('probabilities', {})
         if 'buy_probability' in probabilities and 'sell_probability' in probabilities:
-            # Convert to standard format
             probabilities = {
                 'buy': probabilities['buy_probability'],
                 'sell': probabilities['sell_probability']
             }
         else:
-            # Fallback probabilities
             probabilities = {
                 'buy': result['confidence'] if prediction == 1 else 100 - result['confidence'],
                 'sell': 100 - result['confidence'] if prediction == 1 else result['confidence']
             }
         
-        # Get confidence tier
+        # Enhanced confidence tier with signal score consideration
+        signal_score = result.get('signal_score', 0)
+        max_score = result.get('max_score', 10)
+        score_ratio = signal_score / max_score if max_score > 0 else 0
+        
         confidence_tier = "medium"
         num_trades = 3
-        if confidence >= 0.7:
+        if confidence >= 70 and score_ratio >= 0.7:
             confidence_tier = "high"
             num_trades = 1
-        elif confidence >= 0.6:
+        elif confidence >= 60 and score_ratio >= 0.5:
             confidence_tier = "medium"
             num_trades = 3
-        elif confidence >= 0.5:
+        elif confidence >= 50:
             confidence_tier = "low"
             num_trades = 5
         else:
@@ -142,10 +153,24 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
         # Market context
         market_session = get_market_session()
         
-        # Generate trading signals
-        signals = generate_trading_signals(prediction, {}, confidence)
+        # Generate enhanced trading signals with regression info
+        signals = generate_trading_signals(prediction, {}, confidence_decimal)
         
-        # Build final result
+        # Add enhanced signals based on regression analysis
+        regression_slope = result.get('regression_slope', 0)
+        if regression_slope > 0.001:
+            signals['active_signals'].append("📈 STRONG UPTREND - Regression Confirmed")
+        elif regression_slope < -0.001:
+            signals['active_signals'].append("📉 STRONG DOWNTREND - Regression Confirmed")
+        
+        # Add pattern signals
+        three_line_strike = result.get('three_line_strike', 0)
+        if three_line_strike == 1:
+            signals['active_signals'].append("🎯 BULLISH Three-Line Strike Pattern")
+        elif three_line_strike == -1:
+            signals['active_signals'].append("🎯 BEARISH Three-Line Strike Pattern")
+        
+        # Build enhanced final result
         final_result = {
             'success': True,
             'symbol': symbol,
@@ -154,7 +179,7 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
             
             # AI Prediction
             'prediction': 'BUY' if prediction == 1 else 'SELL',
-            'confidence': result['confidence'],
+            'confidence': confidence,
             'confidence_tier': confidence_tier,
             'probabilities': probabilities,
             
@@ -179,6 +204,15 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
             # Trading Signals
             'signals': signals,
             
+            # Enhanced Technical Analysis
+            'signal_score': signal_score,
+            'max_score': max_score,
+            'support_level': result.get('support_level'),
+            'resistance_level': result.get('resistance_level'),
+            'regression_slope': regression_slope,
+            'three_line_strike': three_line_strike,
+            'pattern_alignment': result.get('pattern_alignment', 'No pattern alignment data'),
+            
             # Additional info from web model
             'risk_level': result.get('risk_level', 'Medium Risk'),
             'data_points': result.get('data_points', 0),
@@ -190,16 +224,76 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
         return final_result
         
     except Exception as e:
-        return {'error': f'Analysis failed: {str(e)}'}
+        return {'error': f'Enhanced analysis failed: {str(e)}'}
+
+def display_mt5_connection_panel():
+    """Display MT5 connection panel in sidebar"""
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🤖 MT5 Connection")
+    
+    # Connection status
+    if mt5_bridge.connected:
+        st.sidebar.success("✅ MT5 Connected")
+        
+        # Account info
+        account_info = mt5_bridge.get_account_info()
+        if 'error' not in account_info:
+            st.sidebar.info(f"**Account:** {account_info.get('login', 'N/A')}")
+            st.sidebar.info(f"**Balance:** ${account_info.get('balance', 0):.2f}")
+            st.sidebar.info(f"**Equity:** ${account_info.get('equity', 0):.2f}")
+            st.sidebar.info(f"**Free Margin:** ${account_info.get('free_margin', 0):.2f}")
+        
+        # Open positions
+        positions = mt5_bridge.get_open_positions()
+        if isinstance(positions, list):
+            st.sidebar.info(f"**Open Positions:** {len(positions)}")
+            if positions:
+                with st.sidebar.expander("View Positions"):
+                    for pos in positions:
+                        profit_color = "green" if pos['profit'] >= 0 else "red"
+                        st.write(f"**{pos['symbol']} {pos['type']}**")
+                        st.write(f"Lots: {pos['volume']} | P&L: <span style='color:{profit_color}'>${pos['profit']:.2f}</span>", 
+                                unsafe_allow_html=True)
+                        if st.button(f"Close {pos['ticket']}", key=f"close_{pos['ticket']}"):
+                            close_result = mt5_bridge.close_position(pos['ticket'])
+                            if 'error' in close_result:
+                                st.error(f"Close failed: {close_result['error']}")
+                            else:
+                                st.success(f"Position closed! Profit: ${close_result.get('profit', 0):.2f}")
+                                st.rerun()
+        
+        if st.sidebar.button("Disconnect MT5", key="sidebar_disconnect_mt5"):
+            mt5_bridge.disconnect_mt5()
+            st.session_state.mt5_connected = False
+            st.rerun()
+            
+    else:
+        st.sidebar.error("🔴 MT5 Not Connected")
+        with st.sidebar.expander("Connect to MT5"):
+            st.info("Enter your MT5 connection details:")
+            
+            server = st.text_input("Server", value="", key="mt5_server_sidebar")
+            login = st.number_input("Login", value=0, min_value=0, key="mt5_login_sidebar")
+            password = st.text_input("Password", type="password", key="mt5_password_sidebar")
+            
+            if st.button("Connect to MT5", key="connect_mt5_sidebar"):
+                with st.spinner("Connecting to MT5..."):
+                    if mt5_bridge.connect_mt5(server=server, login=login, password=password):
+                        st.session_state.mt5_connected = True
+                        st.success("✅ Successfully connected to MT5!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to connect to MT5")
 
 def main():
+    """Main application function"""
     initialize_session_state()
     
     st.set_page_config(
-        page_title="Forex Analyzer AI",
+        page_title="Forex Analyzer AI Pro",
         page_icon="📈",
         layout="wide",
-        initial_sidebar_state="collapsed"
+        initial_sidebar_state="expanded"
     )
     
     # Add Google AdSense to head
@@ -211,84 +305,62 @@ def main():
     """, unsafe_allow_html=True)
     
     st.markdown(MOBILE_CSS, unsafe_allow_html=True)
-    st.markdown('<h1 class="main-header">🤖 Forex Analyzer AI</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🤖 Forex Analyzer AI Pro</h1>', unsafe_allow_html=True)
     
     st.success("""
-    **📊 LIVE MARKET DATA MODE**: Using enhanced AI model with robust data processing.
-    **🎯 Professional Tactical Pip Targets**: Dynamic 1:2 risk-reward ratios.
-    **🤖 IMPROVED AI**: Better error handling and feature engineering.
-    **📺 Ad-Supported**: Free analysis supported by advertisements.
+    **🚀 ENHANCED AI ANALYSIS**: Now with Linear Regression Trend Confirmation & Pattern Recognition
+    **📊 ADVANCED FEATURES**: Three-Line Strike Patterns + Support/Resistance + Regression Channels
+    **🎯 SMART FILTERING**: Avoids false signals in choppy markets
+    **🤖 MT5 INTEGRATION**: Auto-execution for high-confidence signals
+    **📺 Ad-Supported**: Free advanced analysis supported by advertisements
     """)
     
-    # Menu toggle
+    # Menu toggle and main layout
     col1, col2 = st.columns([3, 1])
     with col2:
         if st.button("☰ Menu", key="menu_toggle", use_container_width=True):
             st.session_state.menu_expanded = not st.session_state.menu_expanded
     
-    # Sidebar for expanded menu
-    if st.session_state.get('menu_expanded', False):
-        with st.sidebar:
-            st.header("🔧 Analysis Parameters")
-            
-            symbol = st.text_input(
-                "Forex Pair",
-                value=st.session_state.symbol,
-                max_chars=6,
-                help="Enter 6-character pair (e.g., EURUSD, GBPUSD, USDJPY)"
-            ).upper()
-            
-            timeframe = st.selectbox(
-                "Timeframe", 
-                options=ALL_TIMEFRAMES, 
-                index=ALL_TIMEFRAMES.index(st.session_state.timeframe) if st.session_state.timeframe in ALL_TIMEFRAMES else 3
-            )
-            
-            st.subheader("Account Settings")
-            account_balance = st.number_input("Balance ($)", value=10000, min_value=1000, step=1000)
-            risk_per_trade = st.slider("Risk (%)", 0.5, 5.0, 2.0, 0.5)
-            
-            st.markdown("---")
-            st.success("📱 **Mobile Optimized**")
-            st.info("**🎯 Tactical Pip Targets**")
-            st.warning("**📺 Ad-Supported Service**")
-            
-            analyze_clicked = st.button("🚀 Analyze Market", type="primary", use_container_width=True)
-            
-            # Update session state
-            st.session_state.symbol = symbol
-            st.session_state.timeframe = timeframe
-    else:
-        # Main input form
-        with st.form("main_analysis_form"):
-            col1, col2, col3 = st.columns([2, 2, 1])
-            
-            with col1:
-                symbol = st.text_input(
-                    "Forex Pair", 
-                    value=st.session_state.symbol, 
-                    max_chars=6
-                ).upper()
-            
-            with col2:
-                timeframe = st.selectbox(
-                    "Timeframe", 
-                    options=ALL_TIMEFRAMES, 
-                    index=ALL_TIMEFRAMES.index(st.session_state.timeframe) if st.session_state.timeframe in ALL_TIMEFRAMES else 3
-                )
-            
-            with col3:
-                st.write("")
-                analyze_clicked = st.form_submit_button(
-                    "🚀 Analyze", 
-                    use_container_width=True
-                )
-            
-            # Update session state
-            st.session_state.symbol = symbol
-            st.session_state.timeframe = timeframe
+    # Sidebar for expanded menu and MT5 connection
+    with st.sidebar:
+        st.header("🔧 Analysis Parameters")
         
-        # Quick pairs - Fixed dynamic columns
+        symbol = st.text_input(
+            "Forex Pair",
+            value=st.session_state.symbol,
+            max_chars=6,
+            help="Enter 6-character pair (e.g., EURUSD, GBPUSD, USDJPY)",
+            key="sidebar_symbol_input"
+        ).upper()
+        
+        timeframe = st.selectbox(
+            "Timeframe", 
+            options=ALL_TIMEFRAMES, 
+            index=ALL_TIMEFRAMES.index(st.session_state.timeframe) if st.session_state.timeframe in ALL_TIMEFRAMES else 3,
+            key="sidebar_timeframe_select"
+        )
+        
+        st.subheader("Account Settings")
+        account_balance = st.number_input("Balance ($)", value=10000, min_value=1000, step=1000, key="sidebar_balance_input")
+        risk_per_trade = st.slider("Risk (%)", 0.5, 5.0, 2.0, 0.5, key="sidebar_risk_slider")
+        
+        st.markdown("---")
+        st.success("📱 **Mobile Optimized**")
+        st.info("**🎯 Advanced Pattern Recognition**")
+        st.warning("**🤖 MT5 Auto-Execution**")
+        
+        analyze_clicked = st.button("🚀 Analyze Market", type="primary", use_container_width=True, key="sidebar_analyze_button")
+        
+        # Update session state
+        st.session_state.symbol = symbol
+        st.session_state.timeframe = timeframe
+        
+        # MT5 Connection Panel
+        display_mt5_connection_panel()
+    
+    # Main content area
+    if not st.session_state.get('menu_expanded', False):
+        # Quick pairs - Fixed dynamic columns with unique keys
         st.subheader("Quick Pairs")
         
         # Create dynamic columns based on number of pairs
@@ -297,18 +369,13 @@ def main():
         
         for i, pair in enumerate(QUICK_PAIRS):
             with quick_cols[i]:
-                if st.button(pair, use_container_width=True, key=f"quick_{pair}"):
+                if st.button(pair, use_container_width=True, key=f"quick_{pair}_{i}"):
                     st.session_state.symbol = pair
                     analyze_clicked = True
         
         # Default account settings for mobile view
         account_balance = 10000
         risk_per_trade = 2.0
-    
-    # Handle analysis trigger from sidebar
-    if st.session_state.get('menu_expanded', False):
-        if st.sidebar.button("🚀 Analyze Market", type="primary", use_container_width=True):
-            analyze_clicked = True
     
     # Perform analysis with ad viewing requirement
     if analyze_clicked:
@@ -342,17 +409,27 @@ def main():
                     # Reset ad watched for next attempt
                     st.session_state.ad_watched = False
                 else:
+                    # Store last analysis for potential re-use
+                    st.session_state.last_analysis = result
+                    
+                    # Display analysis results
                     display_analysis_result(result, account_balance, risk_per_trade)
+                    
                     # Show thank you message
                     st.success("""
                     **🙏 Thank you for watching the ad!** 
-                    Your support helps us maintain and improve this free AI trading tool.
+                    Your support helps us maintain and improve this advanced AI trading tool.
                     """)
                     
-                    # Reset ad watched for next analysis (optional - remove this line if you want one ad per session)
+                    # Reset ad watched for next analysis
                     st.session_state.ad_watched = False
         else:
             st.error("⚠️ Please enter a valid 6-character Forex pair")
+    
+    # Display last analysis if available (for quick re-runs)
+    elif st.session_state.get('last_analysis') and not analyze_clicked:
+        st.info("💡 Displaying last analysis results. Click 'Analyze Market' for fresh analysis.")
+        display_analysis_result(st.session_state.last_analysis, account_balance, risk_per_trade)
     
     # Additional AdSense ads in the footer
     st.markdown("---")
@@ -375,10 +452,18 @@ def main():
     # Mobile footer
     st.markdown(
         "<div style='text-align: center; color: #666; font-size: 0.8rem;'>"
-        "📱 Mobile Optimized • 🎯 Tactical Pip Targets • 🤖 Enhanced AI • 📺 Ad-Supported • ⚠️ Educational Purpose Only"
+        "📱 Mobile Optimized • 🎯 Advanced AI • 📊 Regression Analysis • 🤖 MT5 Integration • ⚠️ Educational Purpose Only"
         "</div>", 
         unsafe_allow_html=True
     )
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
+        st.info("Please refresh the page and try again.")
+    finally:
+        # Ensure MT5 connection is closed properly when the app stops
+        if mt5_bridge.connected:
+            mt5_bridge.disconnect_mt5()

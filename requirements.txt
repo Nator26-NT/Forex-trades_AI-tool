@@ -5,3 +5,5 @@ plotly>=5.18.0
 scikit-learn>=1.4.0
 ta-lib>=0.4.28
 yfinance>=0.2.18
+requests>=2.31.0
+MetaTrader5>=5.0.0
