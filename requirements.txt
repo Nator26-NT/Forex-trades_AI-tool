@@ -6,4 +6,5 @@ scikit-learn>=1.4.0
 ta-lib>=0.4.28
 yfinance>=0.2.18
 requests>=2.31.0
-MetaTrader5>=5.0.0
+# Remove or comment out MetaTrader5 if not absolutely essential
+# MetaTrader5>=5.0.0
