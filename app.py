@@ -2,10 +2,10 @@
 import streamlit as st
 from datetime import datetime
 import time
-from config import MOBILE_CSS, ALL_TIMEFRAMES, QUICK_PAIRS
+from config import MOBILE_CSS, ALL_TIMEFRAMES, QUICK_PAIRS, AI_MODEL_SETTINGS
 from web_model import WebForexPredictor
-from risk_manager import RiskManager, get_market_session, generate_trading_signals
-from ui_components import display_analysis_result
+from risk_manager import RiskManager, get_market_session, generate_trading_signals, AdvancedRiskManager
+from ui_components import display_analysis_result, display_pattern_insights, display_market_condition_analysis
 from mt5_integration import mt5_bridge
 
 def initialize_session_state():
@@ -26,6 +26,10 @@ def initialize_session_state():
         st.session_state.mt5_connected = False
     if 'last_analysis' not in st.session_state:
         st.session_state.last_analysis = None
+    if 'use_api_data' not in st.session_state:
+        st.session_state.use_api_data = True
+    if 'advanced_analysis' not in st.session_state:
+        st.session_state.advanced_analysis = True
 
 def show_ads():
     """Display Google AdSense ads and timer"""
@@ -93,14 +97,15 @@ def show_ad_timer():
     
     return remaining
 
-def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
-    """Perform enhanced AI analysis with regression and pattern recognition"""
+def perform_enhanced_analysis(symbol: str, timeframe: str, use_api: bool = True) -> dict:
+    """Perform enhanced AI analysis with pattern recognition and regression"""
     try:
         # Use the WebForexPredictor from web_model.py
         predictor = WebForexPredictor()
         
-        with st.spinner("🤖 AI is analyzing LIVE market data with advanced regression analysis..."):
-            result = predictor.perform_web_analysis(symbol, timeframe)
+        data_source = "API" if use_api else "Synthetic"
+        with st.spinner(f"🤖 AI is analyzing {data_source} market data with advanced pattern recognition..."):
+            result = predictor.perform_web_analysis(symbol, timeframe, use_api)
         
         if 'error' in result:
             return {'error': result['error']}
@@ -108,7 +113,7 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
         if not result.get('success', False):
             return {'error': 'Analysis failed - no results returned'}
         
-        # Enhanced prediction handling with regression confirmation
+        # Enhanced prediction handling with pattern confirmation
         prediction = 1 if "BUY" in result['recommendation'] else 0
         confidence = result['confidence']
         confidence_decimal = confidence / 100
@@ -128,7 +133,7 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
         
         # Enhanced confidence tier with signal score consideration
         signal_score = result.get('signal_score', 0)
-        max_score = result.get('max_score', 10)
+        max_score = result.get('max_score', 12)
         score_ratio = signal_score / max_score if max_score > 0 else 0
         
         confidence_tier = "medium"
@@ -146,17 +151,33 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
             confidence_tier = "very_low"
             num_trades = 0
         
-        # Calculate TP/SL levels
+        # Calculate TP/SL levels with advanced risk management
         current_price = result['current_price']
-        tp_sl_levels = RiskManager.calculate_tp_sl_levels(current_price, prediction, timeframe)
+        
+        # Use advanced risk manager for dynamic pip targets
+        advanced_pip_targets = AdvancedRiskManager.get_tactical_pip_targets(
+            timeframe, symbol, result
+        )
+        
+        # Enhanced TP/SL calculation
+        tp_sl_levels = AdvancedRiskManager.calculate_tactical_tp_sl_levels(
+            current_price, prediction, timeframe, symbol, result
+        )
         
         # Market context
         market_session = get_market_session()
         
-        # Generate enhanced trading signals with regression info
+        # Generate enhanced trading signals with pattern info
         signals = generate_trading_signals(prediction, {}, confidence_decimal)
         
-        # Add enhanced signals based on regression analysis
+        # Add enhanced signals based on pattern analysis
+        double_patterns = result.get('double_patterns', {})
+        if double_patterns.get('double_top'):
+            signals['active_signals'].append("⚠️ DOUBLE TOP Pattern Detected - Potential Bearish Reversal")
+        if double_patterns.get('double_bottom'):
+            signals['active_signals'].append("⚠️ DOUBLE BOTTOM Pattern Detected - Potential Bullish Reversal")
+        
+        # Add regression signals
         regression_slope = result.get('regression_slope', 0)
         if regression_slope > 0.001:
             signals['active_signals'].append("📈 STRONG UPTREND - Regression Confirmed")
@@ -170,12 +191,33 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
         elif three_line_strike == -1:
             signals['active_signals'].append("🎯 BEARISH Three-Line Strike Pattern")
         
+        # Enhanced regression analysis signals
+        enhanced_regression = result.get('enhanced_regression', {})
+        regression_signals = []
+        for tf, reg_data in enhanced_regression.items():
+            if reg_data['r_squared'] > 0.6:
+                direction = "up" if reg_data['slope'] > 0 else "down"
+                regression_signals.append(f"{tf}: Strong {direction} trend (R²={reg_data['r_squared']:.2f})")
+        
+        if regression_signals:
+            signals['active_signals'].extend(regression_signals)
+        
+        # Market condition based adjustments
+        market_condition = result.get('market_condition', 'unknown')
+        if 'consolidation' in market_condition:
+            signals['active_signals'].append("🔄 MARKET CONSOLIDATION - Higher Risk")
+            signals['risk_level'] = "HIGH RISK"
+        elif 'strong_trend' in market_condition:
+            signals['active_signals'].append("📈 STRONG TREND - Lower Risk")
+            signals['risk_level'] = "LOW RISK"
+        
         # Build enhanced final result
         final_result = {
             'success': True,
             'symbol': symbol,
             'timeframe': timeframe,
             'analysis_timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_source': data_source,
             
             # AI Prediction
             'prediction': 'BUY' if prediction == 1 else 'SELL',
@@ -211,6 +253,9 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
             'resistance_level': result.get('resistance_level'),
             'regression_slope': regression_slope,
             'three_line_strike': three_line_strike,
+            'double_patterns': double_patterns,
+            'enhanced_regression': enhanced_regression,
+            'market_condition': market_condition,
             'pattern_alignment': result.get('pattern_alignment', 'No pattern alignment data'),
             
             # Additional info from web model
@@ -218,7 +263,11 @@ def perform_enhanced_analysis(symbol: str, timeframe: str) -> dict:
             'data_points': result.get('data_points', 0),
             'timeframe_advice': result.get('timeframe_advice', ''),
             'latest_date': result.get('latest_date', ''),
-            'color': result.get('color', 'orange')
+            'color': result.get('color', 'orange'),
+            
+            # Advanced features
+            'advanced_pip_targets': advanced_pip_targets,
+            'volatility_adjustment': tp_sl_levels.get('volatility_adjustment', 1.0)
         }
         
         return final_result
@@ -290,7 +339,7 @@ def main():
     initialize_session_state()
     
     st.set_page_config(
-        page_title="Forex Analyzer AI Pro",
+        page_title="Forex Analyzer AI Pro - Advanced Pattern Recognition",
         page_icon="📈",
         layout="wide",
         initial_sidebar_state="expanded"
@@ -305,13 +354,13 @@ def main():
     """, unsafe_allow_html=True)
     
     st.markdown(MOBILE_CSS, unsafe_allow_html=True)
-    st.markdown('<h1 class="main-header">🤖 Forex Analyzer AI Pro</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🤖 Forex Analyzer AI Pro - Advanced Pattern Recognition</h1>', unsafe_allow_html=True)
     
     st.success("""
-    **🚀 ENHANCED AI ANALYSIS**: Now with Linear Regression Trend Confirmation & Pattern Recognition
-    **📊 ADVANCED FEATURES**: Three-Line Strike Patterns + Support/Resistance + Regression Channels
-    **🎯 SMART FILTERING**: Avoids false signals in choppy markets
-    **🤖 MT5 INTEGRATION**: Auto-execution for high-confidence signals
+    **🚀 ENHANCED AI ANALYSIS**: Now with Double Top/Bottom Pattern Recognition & Multi-Timeframe Regression
+    **📊 ADVANCED FEATURES**: Pattern Database Integration + Linear Regression + Market Condition Classification
+    **🎯 SMART PATTERN FILTERING**: Avoids false signals using historical pattern data
+    **🤖 MT5 INTEGRATION**: Auto-execution for high-confidence pattern signals
     **📺 Ad-Supported**: Free advanced analysis supported by advertisements
     """)
     
@@ -323,7 +372,7 @@ def main():
     
     # Sidebar for expanded menu and MT5 connection
     with st.sidebar:
-        st.header("🔧 Analysis Parameters")
+        st.header("🔧 Advanced Analysis Parameters")
         
         symbol = st.text_input(
             "Forex Pair",
@@ -340,16 +389,35 @@ def main():
             key="sidebar_timeframe_select"
         )
         
-        st.subheader("Account Settings")
+        # Data source selection
+        use_api_data = st.radio(
+            "Data Source",
+            ["Live API Data", "Synthetic Data (Demo)"],
+            index=0 if st.session_state.use_api_data else 1,
+            key="data_source_radio"
+        )
+        st.session_state.use_api_data = (use_api_data == "Live API Data")
+        
+        st.subheader("Advanced Account Settings")
         account_balance = st.number_input("Balance ($)", value=10000, min_value=1000, step=1000, key="sidebar_balance_input")
         risk_per_trade = st.slider("Risk (%)", 0.5, 5.0, 2.0, 0.5, key="sidebar_risk_slider")
+        
+        # Advanced analysis options
+        st.subheader("Analysis Options")
+        advanced_analysis = st.checkbox(
+            "Enable Advanced Pattern Recognition", 
+            value=st.session_state.advanced_analysis,
+            help="Use pattern database and multi-timeframe regression"
+        )
+        st.session_state.advanced_analysis = advanced_analysis
         
         st.markdown("---")
         st.success("📱 **Mobile Optimized**")
         st.info("**🎯 Advanced Pattern Recognition**")
-        st.warning("**🤖 MT5 Auto-Execution**")
+        st.warning("**📊 Multi-Timeframe Regression**")
+        st.info("**🤖 MT5 Auto-Execution**")
         
-        analyze_clicked = st.button("🚀 Analyze Market", type="primary", use_container_width=True, key="sidebar_analyze_button")
+        analyze_clicked = st.button("🚀 Analyze Market with Patterns", type="primary", use_container_width=True, key="sidebar_analyze_button")
         
         # Update session state
         st.session_state.symbol = symbol
@@ -373,6 +441,10 @@ def main():
                     st.session_state.symbol = pair
                     analyze_clicked = True
         
+        # Data source info
+        data_source_info = "Live API Data" if st.session_state.use_api_data else "Synthetic Data (Demo)"
+        st.info(f"**Current Data Source:** {data_source_info}")
+        
         # Default account settings for mobile view
         account_balance = 10000
         risk_per_trade = 2.0
@@ -381,6 +453,7 @@ def main():
     if analyze_clicked:
         symbol = st.session_state.symbol
         timeframe = st.session_state.timeframe
+        use_api = st.session_state.use_api_data
         
         if symbol and len(symbol) == 6:
             # Check if user has watched ad
@@ -401,7 +474,7 @@ def main():
                     st.rerun()
             else:
                 # User has watched ad, proceed with analysis
-                result = perform_enhanced_analysis(symbol, timeframe)
+                result = perform_enhanced_analysis(symbol, timeframe, use_api)
                 
                 if 'error' in result:
                     st.error(f"❌ {result['error']}")
@@ -414,6 +487,12 @@ def main():
                     
                     # Display analysis results
                     display_analysis_result(result, account_balance, risk_per_trade)
+                    
+                    # Display additional pattern insights
+                    display_pattern_insights(result)
+                    
+                    # Display market condition analysis
+                    display_market_condition_analysis(result)
                     
                     # Show thank you message
                     st.success("""
@@ -428,8 +507,11 @@ def main():
     
     # Display last analysis if available (for quick re-runs)
     elif st.session_state.get('last_analysis') and not analyze_clicked:
-        st.info("💡 Displaying last analysis results. Click 'Analyze Market' for fresh analysis.")
-        display_analysis_result(st.session_state.last_analysis, account_balance, risk_per_trade)
+        st.info("💡 Displaying last analysis results. Click 'Analyze Market with Patterns' for fresh analysis.")
+        result = st.session_state.last_analysis
+        display_analysis_result(result, account_balance, risk_per_trade)
+        display_pattern_insights(result)
+        display_market_condition_analysis(result)
     
     # Additional AdSense ads in the footer
     st.markdown("---")
@@ -452,7 +534,7 @@ def main():
     # Mobile footer
     st.markdown(
         "<div style='text-align: center; color: #666; font-size: 0.8rem;'>"
-        "📱 Mobile Optimized • 🎯 Advanced AI • 📊 Regression Analysis • 🤖 MT5 Integration • ⚠️ Educational Purpose Only"
+        "📱 Mobile Optimized • 🎯 Pattern Recognition • 📊 Regression Analysis • 🤖 MT5 Integration • ⚠️ Educational Purpose Only"
         "</div>", 
         unsafe_allow_html=True
     )

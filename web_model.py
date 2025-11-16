@@ -45,6 +45,78 @@ class ForexDataFetcher:
         except requests.exceptions.RequestException as e:
             raise ValueError(f"Network error: {str(e)}")
     
+    def fetch_forex_data_without_api(self, symbol: str, timeframe: str = "1day"):
+        """
+        Simulate forex data without using API (for demo/testing)
+        This generates synthetic data based on pattern analysis
+        """
+        # Generate synthetic data based on patterns
+        days = 100
+        base_price = 1.1000  # Base price for EURUSD
+        
+        dates = pd.date_range(end=pd.Timestamp.now(), periods=days, freq='D')
+        
+        # Create price data with trends and patterns
+        np.random.seed(42)  # For reproducible results
+        returns = np.random.normal(0.0001, 0.005, days)
+        prices = base_price * (1 + returns).cumprod()
+        
+        # Add some patterns based on the pattern database
+        patterns = self._apply_pattern_effects(prices, days)
+        
+        df = pd.DataFrame({
+            'date': dates,
+            'open': patterns['open'],
+            'high': patterns['high'],
+            'low': patterns['low'],
+            'close': patterns['close'],
+            'volume': np.random.randint(1000000, 5000000, days)
+        })
+        
+        return df
+    
+    def _apply_pattern_effects(self, prices, days):
+        """Apply pattern-based effects to synthetic data"""
+        opens = []
+        highs = []
+        lows = []
+        closes = []
+        
+        for i in range(days):
+            base_price = prices[i]
+            volatility = 0.002  # 0.2% daily volatility
+            
+            # Simulate OHLC prices
+            open_price = base_price
+            close_price = base_price * (1 + np.random.normal(0, volatility))
+            
+            # Calculate high and low with pattern influences
+            price_range = abs(close_price - open_price)
+            high = max(open_price, close_price) + price_range * 0.5
+            low = min(open_price, close_price) - price_range * 0.5
+            
+            # Apply double top/bottom patterns occasionally
+            if i % 20 == 15:  # Simulate double top
+                high = open_price * 1.01
+                close_price = open_price * 0.995
+                low = open_price * 0.99
+            elif i % 20 == 5:  # Simulate double bottom
+                low = open_price * 0.99
+                close_price = open_price * 1.005
+                high = open_price * 1.01
+            
+            opens.append(open_price)
+            highs.append(high)
+            lows.append(low)
+            closes.append(close_price)
+        
+        return {
+            'open': opens,
+            'high': highs,
+            'low': lows,
+            'close': closes
+        }
+    
     def _get_optimal_outputsize(self, timeframe: str) -> int:
         """Get optimal data points based on timeframe for performance"""
         outputsize_map = {
@@ -94,13 +166,16 @@ class WebForexPredictor:
         self.data_fetcher = ForexDataFetcher()
         self.predictor = AdvancedForexPredictor()
 
-    def perform_web_analysis(self, pair: str, timeframe: str):
-        """Enhanced analysis using advanced AI predictor with regression confirmation"""
+    def perform_web_analysis(self, pair: str, timeframe: str, use_api: bool = True):
+        """Enhanced analysis using advanced AI predictor with pattern recognition"""
         try:
-            # Fetch data using your existing fetcher
-            df = self.data_fetcher.fetch_forex_data(pair, timeframe)
+            # Fetch data
+            if use_api:
+                df = self.data_fetcher.fetch_forex_data(pair, timeframe)
+            else:
+                df = self.data_fetcher.fetch_forex_data_without_api(pair, timeframe)
             
-            if len(df) < 50:  # Increased minimum for regression analysis
+            if len(df) < 50:
                 return {'error': 'Not enough historical data for advanced analysis (minimum 50 data points required)'}
             
             # Train model using advanced predictor
@@ -120,35 +195,15 @@ class WebForexPredictor:
             confidence = result['confidence']
             signal_score = result['signal_score']
             max_score = result['max_score']
+            market_condition = result['market_condition']
             
             # Generate comprehensive recommendation
-            if prediction == 1 and confidence > 0.7 and signal_score > 7:
-                recommendation = "STRONG BUY"
-                risk_level = "Low Risk"
-                color = "green"
-            elif prediction == 1 and confidence > 0.6 and signal_score > 5:
-                recommendation = "MODERATE BUY" 
-                risk_level = "Medium Risk"
-                color = "orange"
-            elif prediction == 1:
-                recommendation = "WEAK BUY"
-                risk_level = "High Risk"
-                color = "red"
-            elif prediction == 0 and confidence > 0.7 and signal_score > 7:
-                recommendation = "STRONG SELL"
-                risk_level = "Low Risk"
-                color = "green"
-            elif prediction == 0 and confidence > 0.6 and signal_score > 5:
-                recommendation = "MODERATE SELL"
-                risk_level = "Medium Risk"
-                color = "orange"
-            else:
-                recommendation = "WEAK SELL"
-                risk_level = "High Risk"
-                color = "red"
+            recommendation, risk_level, color = self._generate_recommendation(
+                prediction, confidence, signal_score, market_condition
+            )
             
             # Enhanced timeframe advice
-            timeframe_advice = self._get_enhanced_timeframe_advice(timeframe, result)
+            timeframe_advice = self._get_enhanced_timeframe_advice(timeframe, result, market_condition)
             
             return {
                 'success': True,
@@ -175,14 +230,61 @@ class WebForexPredictor:
                 'resistance_level': round(result['resistance_level'], 4),
                 'regression_slope': round(result['regression_slope'], 6),
                 'three_line_strike': result['three_line_strike'],
-                'pattern_alignment': self._get_pattern_alignment(result['three_line_strike'], prediction)
+                'double_patterns': result['double_patterns'],
+                'enhanced_regression': result['enhanced_regression'],
+                'market_condition': market_condition,
+                'pattern_alignment': self._get_pattern_alignment(
+                    result['three_line_strike'], 
+                    result['double_patterns'], 
+                    prediction
+                ),
+                'data_source': 'API' if use_api else 'Synthetic'
             }
             
         except Exception as e:
             return {'error': f'Advanced analysis failed: {str(e)}'}
     
-    def _get_enhanced_timeframe_advice(self, timeframe: str, result: dict) -> str:
-        """Get enhanced timeframe advice including regression analysis"""
+    def _generate_recommendation(self, prediction, confidence, signal_score, market_condition):
+        """Generate trading recommendation based on multiple factors"""
+        # Base recommendation
+        if prediction == 1 and confidence > 0.7 and signal_score > 8:
+            base_rec = "STRONG BUY"
+            risk_level = "Low Risk"
+            color = "green"
+        elif prediction == 1 and confidence > 0.6 and signal_score > 6:
+            base_rec = "MODERATE BUY" 
+            risk_level = "Medium Risk"
+            color = "orange"
+        elif prediction == 1:
+            base_rec = "WEAK BUY"
+            risk_level = "High Risk"
+            color = "red"
+        elif prediction == 0 and confidence > 0.7 and signal_score > 8:
+            base_rec = "STRONG SELL"
+            risk_level = "Low Risk"
+            color = "green"
+        elif prediction == 0 and confidence > 0.6 and signal_score > 6:
+            base_rec = "MODERATE SELL"
+            risk_level = "Medium Risk"
+            color = "orange"
+        else:
+            base_rec = "WEAK SELL"
+            risk_level = "High Risk"
+            color = "red"
+        
+        # Adjust based on market condition
+        if "strong_trend" in market_condition:
+            base_rec += " | STRONG TREND"
+        elif "consolidation" in market_condition:
+            base_rec += " | CONSOLIDATION"
+            risk_level = "Higher Risk"
+        elif "reversal" in market_condition:
+            base_rec += " | POTENTIAL REVERSAL"
+        
+        return base_rec, risk_level, color
+    
+    def _get_enhanced_timeframe_advice(self, timeframe: str, result: dict, market_condition: str) -> str:
+        """Get enhanced timeframe advice including regression analysis and patterns"""
         base_advice = {
             "1min": "Scalping strategy. Very short-term movements. High frequency trading.",
             "5min": "Day trading strategy. Short-term price actions.",
@@ -197,30 +299,59 @@ class WebForexPredictor:
         # Add regression trend info
         slope = result.get('regression_slope', 0)
         if slope > 0.001:
-            trend_info = " Strong uptrend confirmed by regression analysis."
+            trend_info = " 📈 Strong uptrend confirmed by regression analysis."
         elif slope < -0.001:
-            trend_info = " Strong downtrend confirmed by regression analysis."
+            trend_info = " 📉 Strong downtrend confirmed by regression analysis."
         else:
-            trend_info = " Sideways market - exercise caution."
+            trend_info = " ➡️ Sideways market - exercise caution."
             
         # Add pattern info
-        pattern = result.get('three_line_strike', 0)
-        if pattern == 1:
-            pattern_info = " Bullish Three-Line Strike pattern detected."
-        elif pattern == -1:
-            pattern_info = " Bearish Three-Line Strike pattern detected."
-        else:
-            pattern_info = ""
+        pattern_info = ""
+        three_line_strike = result.get('three_line_strike', 0)
+        if three_line_strike == 1:
+            pattern_info += " 🎯 Bullish Three-Line Strike pattern detected."
+        elif three_line_strike == -1:
+            pattern_info += " 🎯 Bearish Three-Line Strike pattern detected."
             
-        return base_advice + trend_info + pattern_info
+        double_patterns = result.get('double_patterns', {})
+        if double_patterns.get('double_top'):
+            pattern_info += " ⚠️ Double Top pattern detected (Bearish)."
+        if double_patterns.get('double_bottom'):
+            pattern_info += " ⚠️ Double Bottom pattern detected (Bullish)."
+            
+        # Add market condition info
+        market_info = f" 📊 Market Condition: {market_condition.replace('_', ' ').title()}"
+            
+        return base_advice + trend_info + pattern_info + market_info
     
-    def _get_pattern_alignment(self, pattern: int, prediction: int) -> str:
+    def _get_pattern_alignment(self, three_line_strike: int, double_patterns: dict, prediction: int) -> str:
         """Check if pattern aligns with prediction"""
-        if pattern == 1 and prediction == 1:
-            return "Pattern aligns with BUY signal"
-        elif pattern == -1 and prediction == 0:
-            return "Pattern aligns with SELL signal"
-        elif pattern == 0:
+        patterns = []
+        
+        if three_line_strike == 1:
+            patterns.append("Three-Line Strike Bullish")
+        elif three_line_strike == -1:
+            patterns.append("Three-Line Strike Bearish")
+            
+        if double_patterns.get('double_top'):
+            patterns.append("Double Top Bearish")
+        if double_patterns.get('double_bottom'):
+            patterns.append("Double Bottom Bullish")
+        
+        if not patterns:
             return "No significant pattern detected"
+        
+        # Check if patterns align with prediction
+        bullish_patterns = [p for p in patterns if 'Bullish' in p]
+        bearish_patterns = [p for p in patterns if 'Bearish' in p]
+        
+        if prediction == 1 and bullish_patterns and not bearish_patterns:
+            return "All patterns align with BUY signal"
+        elif prediction == 0 and bearish_patterns and not bullish_patterns:
+            return "All patterns align with SELL signal"
+        elif prediction == 1 and bearish_patterns:
+            return "Warning: Some bearish patterns contradict BUY signal"
+        elif prediction == 0 and bullish_patterns:
+            return "Warning: Some bullish patterns contradict SELL signal"
         else:
-            return "Pattern contradicts signal - exercise caution"
+            return "Mixed pattern signals"

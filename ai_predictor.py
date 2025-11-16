@@ -5,6 +5,80 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LinearRegression
 import talib
 from config import API_KEY, BASE_URL
+import os
+
+class PatternAnalyzer:
+    def __init__(self):
+        self.patterns_df = None
+        self.meta_df = None
+        self.segmentation_df = None
+        self.load_pattern_data()
+    
+    def load_pattern_data(self):
+        """Load pattern data from CSV files"""
+        try:
+            # Load pattern metadata
+            if os.path.exists('Meta.csv'):
+                self.meta_df = pd.read_csv('Meta.csv')
+            
+            # Load pattern details
+            if os.path.exists('Patterns.csv'):
+                self.patterns_df = pd.read_csv('Patterns.csv')
+            
+            # Load segmentation data
+            if os.path.exists('Segmentation.csv'):
+                self.segmentation_df = pd.read_csv('Segmentation.csv')
+                
+        except Exception as e:
+            print(f"Warning: Could not load pattern data: {e}")
+    
+    def classify_market_condition(self, df):
+        """
+        Classify market condition based on pattern data and current price action
+        """
+        if self.patterns_df is None:
+            return "unknown"
+        
+        try:
+            # Analyze recent price action
+            recent_data = df.tail(20)
+            volatility = recent_data['high'].std() / recent_data['close'].mean()
+            trend_strength = self.calculate_trend_strength(recent_data)
+            
+            # Count pattern occurrences
+            double_top_count = len(self.patterns_df[self.patterns_df['ClassName'] == 'Double top'])
+            double_bottom_count = len(self.patterns_df[self.patterns_df['ClassName'] == 'Double bottom'])
+            
+            # Determine market condition
+            if volatility < 0.001 and trend_strength < 0.3:
+                return "consolidation"
+            elif trend_strength > 0.7:
+                return "strong_trend"
+            elif double_top_count > double_bottom_count:
+                return "potential_reversal_bearish"
+            elif double_bottom_count > double_top_count:
+                return "potential_reversal_bullish"
+            else:
+                return "mixed"
+                
+        except Exception as e:
+            print(f"Error classifying market condition: {e}")
+            return "unknown"
+    
+    def calculate_trend_strength(self, df):
+        """Calculate trend strength using linear regression"""
+        if len(df) < 5:
+            return 0
+            
+        x = np.arange(len(df))
+        y = df['close'].values
+        
+        # Linear regression for trend
+        slope = np.polyfit(x, y, 1)[0]
+        avg_price = y.mean()
+        trend_strength = abs(slope / avg_price) if avg_price != 0 else 0
+        
+        return min(trend_strength * 1000, 1.0)  # Normalize to 0-1
 
 class AdvancedForexPredictor:
     def __init__(self, lookback_period=50, regression_window=20):
@@ -13,6 +87,7 @@ class AdvancedForexPredictor:
         self.is_trained = False
         self.lookback_period = lookback_period
         self.regression_window = regression_window
+        self.pattern_analyzer = PatternAnalyzer()
         
     def calculate_confidence_tier(self, confidence):
         if confidence >= 0.7:
@@ -57,6 +132,31 @@ class AdvancedForexPredictor:
             return -1
         else:
             return 0
+    
+    def detect_double_patterns(self, df):
+        """
+        Detect double top and double bottom patterns using pattern database
+        Returns: dict with pattern information
+        """
+        if len(df) < 10:
+            return {'double_top': False, 'double_bottom': False, 'pattern_confidence': 0}
+        
+        # Use pattern analyzer to detect double patterns
+        market_condition = self.pattern_analyzer.classify_market_condition(df)
+        
+        double_top = "potential_reversal_bearish" in market_condition
+        double_bottom = "potential_reversal_bullish" in market_condition
+        
+        # Calculate pattern confidence based on recent volatility and trend
+        recent_volatility = df['close'].pct_change().std()
+        pattern_confidence = min(recent_volatility * 1000, 0.8)  # Normalize confidence
+        
+        return {
+            'double_top': double_top,
+            'double_bottom': double_bottom,
+            'pattern_confidence': pattern_confidence,
+            'market_condition': market_condition
+        }
     
     def calculate_support_resistance(self, df, window=20):
         """
@@ -129,19 +229,44 @@ class AdvancedForexPredictor:
             'volatility': std_dev
         }
     
+    def enhanced_linear_regression_analysis(self, df):
+        """
+        Enhanced regression analysis with multiple timeframes
+        """
+        timeframes = [5, 10, 20, 50]
+        results = {}
+        
+        for tf in timeframes:
+            if len(df) >= tf:
+                prices = df['close'].iloc[-tf:]
+                slope, r_squared = self.linear_regression_trend(prices)
+                results[f'regression_tf_{tf}'] = {
+                    'slope': slope,
+                    'r_squared': r_squared,
+                    'trend_strength': r_squared,
+                    'direction': 'up' if slope > 0 else 'down'
+                }
+        
+        return results
+    
     def calculate_signal_score(self, df, current_price):
         """
         Calculate comprehensive signal score based on multiple factors
         """
         score = 0
-        max_score = 10
+        max_score = 12  # Increased max score for additional factors
 
-        # 1. Three Line Strike Pattern (30% weight)
+        # 1. Three Line Strike Pattern (20% weight)
         strike_pattern = self.detect_three_line_strike(df)
         if strike_pattern != 0:
-            score += 3
+            score += 2.4
         
-        # 2. Support/Resistance Alignment (30% weight)
+        # 2. Double Pattern Detection (20% weight)
+        double_patterns = self.detect_double_patterns(df)
+        if double_patterns['double_top'] or double_patterns['double_bottom']:
+            score += 2.4 * double_patterns['pattern_confidence']
+        
+        # 3. Support/Resistance Alignment (20% weight)
         levels = self.calculate_support_resistance(df)
         if levels:
             distance_to_support = abs(current_price - levels['support'])
@@ -151,16 +276,26 @@ class AdvancedForexPredictor:
             if price_range > 0:
                 support_proximity = 1 - (distance_to_support / price_range)
                 resistance_proximity = 1 - (distance_to_resistance / price_range)
-                score += 1.5 * max(support_proximity, resistance_proximity)
+                score += 2.4 * max(support_proximity, resistance_proximity)
         
-        # 3. Regression Trend Strength (40% weight)
+        # 4. Regression Trend Strength (30% weight)
         closes = df['close'].iloc[-self.regression_window:]
         slope, r_squared = self.linear_regression_trend(closes)
         
         trend_strength = min(r_squared * 4, 1.0)
-        score += 4 * trend_strength
+        score += 3.6 * trend_strength
         
-        return min(score, max_score), max_score
+        # 5. Enhanced Regression Analysis (10% weight)
+        enhanced_regression = self.enhanced_linear_regression_analysis(df)
+        multi_timeframe_score = 0
+        for tf_result in enhanced_regression.values():
+            multi_timeframe_score += tf_result['trend_strength']
+        
+        if enhanced_regression:
+            multi_timeframe_score /= len(enhanced_regression)
+            score += 1.2 * multi_timeframe_score
+        
+        return min(score, max_score), max_score, double_patterns
     
     def create_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """Create enhanced features including regression and pattern features"""
@@ -216,6 +351,22 @@ class AdvancedForexPredictor:
         pattern_df = pd.DataFrame(pattern_features, index=df.index)
         df = pd.concat([df, pattern_df], axis=1)
         
+        # Market condition features
+        market_condition_features = []
+        for i in range(len(df)):
+            if i >= 20:
+                window_data = df.iloc[:i+1]  # All data up to current point
+                double_patterns = self.detect_double_patterns(window_data)
+                market_condition_features.append({
+                    'market_condition_score': 1 if 'strong_trend' in double_patterns['market_condition'] else 0.5,
+                    'pattern_based_signal': 1 if double_patterns['double_bottom'] else -1 if double_patterns['double_top'] else 0
+                })
+            else:
+                market_condition_features.append({'market_condition_score': 0, 'pattern_based_signal': 0})
+        
+        market_condition_df = pd.DataFrame(market_condition_features, index=df.index)
+        df = pd.concat([df, market_condition_df], axis=1)
+        
         return df.fillna(0)
     
     def prepare_target(self, data: pd.DataFrame, prediction_horizon: int = 1) -> pd.Series:
@@ -232,7 +383,8 @@ class AdvancedForexPredictor:
             'open', 'high', 'low', 'close', 'price_range', 'price_change', 
             'body_size', 'sma_3', 'sma_5', 'sma_8', 'sma_20',
             'price_vs_sma3', 'price_vs_sma5', 'price_vs_sma8', 'price_vs_sma20',
-            'volatility', 'regression_slope', 'trend_strength', 'three_line_strike'
+            'volatility', 'regression_slope', 'trend_strength', 'three_line_strike',
+            'market_condition_score', 'pattern_based_signal'
         ]
         
         if 'volume' in df_with_features.columns:
@@ -281,10 +433,11 @@ class AdvancedForexPredictor:
         
         # Get additional signal information
         current_price = latest_data['close'].iloc[-1]
-        signal_score, max_score = self.calculate_signal_score(latest_data, current_price)
+        signal_score, max_score, double_patterns = self.calculate_signal_score(latest_data, current_price)
         levels = self.calculate_support_resistance(latest_data)
         channel = self.calculate_regression_channel(latest_data)
         strike_pattern = self.detect_three_line_strike(latest_data)
+        enhanced_regression = self.enhanced_linear_regression_analysis(latest_data)
         
         return {
             'prediction': prediction,
@@ -296,5 +449,8 @@ class AdvancedForexPredictor:
             'resistance_level': levels['resistance'],
             'regression_slope': channel['slope'] if channel else 0,
             'three_line_strike': strike_pattern,
-            'current_price': current_price
+            'double_patterns': double_patterns,
+            'enhanced_regression': enhanced_regression,
+            'current_price': current_price,
+            'market_condition': double_patterns['market_condition']
         }
